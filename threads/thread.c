@@ -27,6 +27,9 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+/* List of processes in THREAD_BLOCKED state, that is, processes
+   that don't reach to wakeup_tick */
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -48,7 +51,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
-
+static int64_t sleep_ticks = INT64_MAX;	/* minimum wakeup_ticks of thread in sleep_list */
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -108,6 +111,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -305,6 +309,54 @@ thread_yield (void) {
 	if (curr != idle_thread)
 		list_push_back (&ready_list, &curr->elem);
 	do_schedule (THREAD_READY);
+	intr_set_level (old_level);
+}
+int64_t
+get_sleep_ticks (void) {
+	enum intr_level old_level = intr_disable ();
+	int64_t t = sleep_ticks;
+	intr_set_level (old_level);
+	barrier ();
+	return t;
+}
+void
+thread_sleep (int64_t ticks) {
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+
+	ASSERT (!intr_context ());
+
+	old_level = intr_disable ();
+	if (curr != idle_thread)
+	{	
+		curr->wakeup_tick = ticks;
+		curr->status = THREAD_BLOCKED;
+		if (sleep_ticks > ticks)	sleep_ticks = ticks;
+		list_push_back (&sleep_list, &curr->elem);
+	}
+	schedule ();
+	intr_set_level (old_level);
+}
+void
+thread_wakeup (int64_t search_tick)
+{	
+	enum intr_level old_level;
+
+	old_level = intr_disable ();
+	/* sleep_list를 순회하면서 깨어날 시간(search_tick >= wakeup_tick)이 된 sleep_thread들을 찾는다 */
+	/* 찾은 thread들을 sleep_list에서 제거하고, ready_list의 뒤로 넣는다 */
+	struct list_elem *curr_sleep_elem = list_begin (&sleep_list);
+	while (curr_sleep_elem != list_end (&sleep_list))
+	{
+		struct thread *curr_sleep_thread = list_entry(curr_sleep_elem, struct thread, elem);
+		if (search_tick >= curr_sleep_thread -> wakeup_tick)	
+		{
+			curr_sleep_elem = list_remove(curr_sleep_elem);
+			thread_unblock(curr_sleep_thread);
+		}
+		else
+			curr_sleep_elem = list_next(curr_sleep_elem);
+	}
 	intr_set_level (old_level);
 }
 

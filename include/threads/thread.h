@@ -4,6 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+// #include <synch.h>
+#include "threads/synch.h"
 #include "threads/interrupt.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -95,6 +97,12 @@ struct thread {
 	int64_t wakeup_tick;
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	/* donation */
+	int init_priority;
+	struct lock *wait_on_lock;
+	struct list donations;
+	struct list_elem donation_elem;
+
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -138,9 +146,16 @@ void thread_yield (void);
 void thread_sleep (int64_t);
 void thread_wakeup (int64_t);
 int64_t get_sleep_ticks (void);
-
+/* priority scheduling */
+bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cmp_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void preemption_by_priority (void);
 int thread_get_priority (void);
 void thread_set_priority (int);
+/* priority donation */
+void donate_priority (void);
+void remove_with_lock (struct lock *lock);
+void refresh_priority (void);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
